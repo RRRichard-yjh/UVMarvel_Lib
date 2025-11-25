@@ -1,1 +1,271 @@
-readme
+## Bus_Protocol_Library
+
+### Overview
+
+`Bus_Protocol_Library` provides **human-readable UVM skeletons** for standard bus protocols, plus minimal Python generator skeletons that illustrate how to drive these templates with an external LLM.
+
+The key idea is to **fix protocol semantics** (ordering rules, handshakes, timing structure) in reusable SystemVerilog skeletons, and let an LLM specialise **design-specific details** (signal names, widths, address ranges, etc.) per DUT.
+
+Currently supported protocols:
+
+- **AHB**
+- **APB**
+
+### Contents
+
+- **Protocol skeletons (SystemVerilog)**
+
+  For each protocol, you get a consistent set of UVM skeleton components:
+
+  - `*_if.sv` – interface and clocking blocks  
+  - `*_trans.sv` – sequence item / transaction type  
+  - `*_driver.sv` – driver  
+  - `*_monitor.sv` – monitor  
+  - `*_sequencer.sv` – sequencer  
+  - `*_agent.sv` – agent  
+
+  These files capture:
+
+  - request/response structure  
+  - handshake behavior and simple protocol checks  
+  - basic timing behaviour (for example, when to sample, when to drive)  
+
+  They are written so that:
+
+  - **control-flow and handshake logic remain fixed**, and  
+  - only clearly identifiable regions (signal names, widths, configuration fields, etc.) are expected to be edited or generated.
+
+- **Generator skeletons (Python)**
+
+  - `generate_ahb_agent.py`  
+  - `generate_apb_agent.py`  
+
+  These scripts show how a tool could:
+
+  - load a **requirements/specification file** and a **protocol template**,  
+  - build a **prompt** that compares the template against the spec (for example, interface signals and widths),  
+  - call an external LLM via a stubbed `get_request(...)` function,  
+  - post-process the LLM’s response to:
+    - write a combined `*_agent_file.sv`, and  
+    - split that file into separate `*.sv` classes (interface, driver, monitor, sequencer, agent).
+
+  Important properties:
+
+  - `get_request(...)` is a **placeholder** that raises `NotImplementedError`.  
+    - There is **no URL**, **no request body**, and **no response parsing** implemented.  
+  - All paths such as `./PATH_TO_REQ_FILE.md` and `./PATH_TO_OUTPUT_AGENT_FILE.sv` are **placeholders**, not working defaults.  
+  - No API keys or real endpoints are present in this repository (only string placeholders like `"api base"` and `"api key"`).
+
+- **Python helper for locating skeletons**
+
+  - `__init__.py`  
+
+    Exposes utilities such as:
+
+    ```python
+    from Bus_Protocol_Library import get_skeleton_dir
+
+    ahb_dir = get_skeleton_dir("ahb")
+    apb_dir = get_skeleton_dir("apb")
+    ```
+
+    so that tools and examples can easily discover the on-disk layout of the library.
+
+- **Example script**
+
+  - `examples/demo_bus_skeletons.py`  
+
+    A small, local-only example that:
+
+    - lists all skeleton files for AHB and APB, and  
+    - prints the first lines of selected skeleton files (for example, the drivers).
+
+    It performs **no network calls** and has no external dependencies beyond the library itself and the standard Python runtime.
+
+### Directory layout
+
+```text
+Bus_Protocol_Library/
+  __init__.py
+  ahb/
+    ahb_if.sv
+    ahb_trans.sv
+    ahb_driver.sv
+    ahb_monitor.sv
+    ahb_sequencer.sv
+    ahb_agent.sv
+  apb/
+    apb_if.sv
+    apb_trans.sv
+    apb_driver.sv
+    apb_monitor.sv
+    apb_sequencer.sv
+    apb_agent.sv
+  examples/
+    demo_bus_skeletons.py
+  generate_ahb_agent.py
+  generate_apb_agent.py
+```
+
+### Intended usage
+
+- **As a source of stable protocol semantics**
+
+  - Treat the `.sv` skeletons as the canonical definition of AHB/APB behaviour in your flow.  
+  - When adapting them to a DUT:
+    - keep the control-flow and handshake structure,  
+    - specialise only:
+      - signal names and widths,  
+      - configuration fields,  
+      - address ranges, and so on.
+
+- **With an external LLM**
+
+  - Implement `get_request(...)` in the generator scripts to integrate with your own LLM server or API.  
+  - Provide:
+    - a requirements/specification file describing the DUT interface,  
+    - a protocol template or skeleton,  
+    - an interface description file if needed.  
+  - Use the LLM’s output and the post-processing logic in the scripts to obtain:
+    - a combined agent file, and  
+    - per-class SystemVerilog files for integration into your UVM testbench.
+
+### Non-goals and scope
+
+- This project is **not** a full VIP or compliance suite:
+  - It does not aim to exhaustively validate protocol timing or coverage.  
+  - It focuses on giving LLMs a **good starting structure** rather than replacing full industrial VIP.
+
+- The Python generator scripts are **examples**, not production tools:
+  - no retry logic,  
+  - no authentication or security handling,  
+  - no guarantees about robustness or error handling.
+
+---
+
+## Verilog_Patch_Template_Library
+
+### Overview
+
+`Verilog_Patch_Template_Library` provides **template-based patchers** for Verilog/SystemVerilog. It is designed to take **incomplete RTL fragments** (for example, statements extracted around an uncovered coverage point) and wrap them into **minimal, syntactically valid** constructs.
+
+The goal is to ensure that even heavily “sliced” RTL remains:
+
+- structurally coherent, and  
+- suitable for downstream tools and LLMs to read and modify.
+
+Typical problems this library targets:
+
+- missing `endcase` or `default` in `case` blocks,  
+- dangling `else` branches without a corresponding `if`,  
+- assignments that have lost their enclosing `always` block,  
+- incomplete module shells and connection lists.
+
+### Contents
+
+- **Core patcher and templates**
+
+  The library includes:
+
+  - a high-level patcher (for example, `SyntaxErrorPatcher`), and  
+  - a set of specialised patchers for:
+    - continuous assignments,  
+    - `if` / `else` constructs,  
+    - `case` blocks,  
+    - `always` blocks,  
+    - other canonical RTL shells (depending on configuration).
+
+  Each patcher uses templates that:
+
+  - reconstruct the **minimal syntactic form** of the construct (headers, keywords, sensitivity lists, and so on),  
+  - keep the **original user statements** intact as much as possible,  
+  - do **not** attempt to change behaviour beyond what is required to compile.
+
+- **Example script**
+
+  - `examples/patch_demo_basic.py`  
+
+    This script demonstrates how to:
+
+    - create a patcher instance,  
+    - feed in small RTL fragments as lists of strings, and  
+    - inspect the “before” and “after” views of:
+
+      - incomplete `assign` statements,  
+      - broken `if` / `else` chains,  
+      - `case` blocks missing `endcase`,  
+      - always blocks missing headers.
+
+    It is intentionally small and operates only on in-memory strings for clarity.
+
+### Typical workflow
+
+A common integration pattern, especially in coverage-driven or refinement flows, looks like this:
+
+1. **Collect relevant fragments**
+
+   - A separate analysis component (for example, a “Signal Tracker”) identifies:
+     - which statements and signals contribute to an uncovered coverage point,  
+     - where they came from in the original RTL (module, always block, case branch, and so on).  
+
+   - After extraction, these fragments might:
+     - be separated from their `always` or `case` headers,  
+     - be scattered across multiple modules or files,  
+     - no longer be valid Verilog when taken alone.
+
+2. **Apply templates to restore minimal structure**
+
+   - For each fragment or group of fragments, the patcher:
+     - inspects the context or metadata to infer the original construct (module shell, always block, case block, and so on),  
+     - selects an appropriate template from `patch_templates/`,  
+     - wraps the fragment in that template, adding only:
+       - missing headers / trailers (`case (...)`, `endcase`, `default`, and so on),  
+       - minimal `always` headers and sensitivity lists,  
+       - basic module shells when needed.
+
+3. **Build a “filtered DUT”**
+
+   - The patched fragments can be stitched together into a **filtered version of the DUT** that:
+     - contains only the logic relevant to the current analysis,  
+     - is syntactically-valid Verilog/SystemVerilog.  
+
+   - This filtered DUT can then be:
+     - passed to an LLM for further refinement or test generation,  
+     - consumed by EDA tools that require syntactically complete RTL.
+
+### Design principles
+
+- **Minimal, canonical structure**
+
+  - Templates are intentionally simple and canonical: they aim to be easy for both humans and LLMs to read.  
+  - The patcher adds only what is needed to restore validity, not full original context.
+
+- **Preserve semantics as much as possible**
+
+  - The focus is on syntax and structure; the library tries not to introduce new behaviour.  
+  - Original assignments and expressions are preserved where they exist; it only reintroduces the surrounding scaffolding.
+
+- **LLM-friendly**
+
+  - By ensuring constructs follow familiar patterns, the patched RTL becomes much easier for language models to:
+    - recognise idioms (`always_ff`, `case` statements, and so on),  
+    - reason about data/control flow,  
+    - safely suggest modifications.
+
+### Getting started
+
+- Add the repository to your Python environment (or install it as a package if you package it yourself).  
+- Explore `patch_templates/` to see what structures are supported.  
+- Run:
+
+  ```bash
+  python -m Verilog_Patch_Template_Library.examples.patch_demo_basic
+  ```
+
+  to see before/after examples for the built-in templates.
+
+- Integrate the patcher into your own toolchain:
+  - after extracting coverage-related or signal-tracked fragments,  
+  - before giving code to an LLM or downstream RTL analysis tool.
+
+
